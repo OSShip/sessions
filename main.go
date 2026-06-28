@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,27 +21,34 @@ func main() {
 	cfg := config.Load()
 	observability.InitSentry("sessions")
 	defer observability.FlushSentry(2 * time.Second)
+	logger := observability.InitLogger("sessions")
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("database connection failed", "err", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
+	logger.Info("database connected")
 
 	pub := events.New(cfg.KafkaBrokers)
 	defer pub.Close()
+	logger.Info("kafka publisher ready", "brokers", cfg.KafkaBrokers)
 
 	st := store.New(pool)
 	h := &handler.Handler{Store: st, Events: pub, JitsiBase: cfg.JitsiBaseURL}
 	scheduler.StartReminders(ctx, st, pub)
+	logger.Info("reminder scheduler started", "interval", "5m", "window", "30m")
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(observability.SentryHTTPMiddleware)
 	r.Use(observability.SentryRecoverMiddleware("sessions"))
 	r.Use(observability.SentryErrorMiddleware("sessions"))
-	r.Use(middleware.Recoverer)
+	r.Use(observability.RequestLogMiddleware("sessions"))
 	r.Use(observability.PrometheusMiddleware("sessions"))
 
 	r.Get("/health", observability.HealthHandler("sessions"))
@@ -54,6 +61,9 @@ func main() {
 	r.Post("/progress", h.AddProgress)
 	r.Get("/progress", h.ListProgress)
 
-	log.Printf("sessions listening on :%s", cfg.Port)
-	log.Fatal(http.ListenAndServe(":"+cfg.Port, r))
+	logger.Info("sessions listening", "port", cfg.Port, "jitsi_base", cfg.JitsiBaseURL)
+	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
+		logger.Error("server failed", "err", err)
+		os.Exit(1)
+	}
 }

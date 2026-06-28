@@ -2,12 +2,13 @@ package scheduler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/OSShip/sessions/internal/events"
 	"github.com/OSShip/sessions/internal/store"
+	"github.com/OSShip/utils/observability"
 )
 
 const (
@@ -38,9 +39,11 @@ func runReminders(ctx context.Context, st *store.Store, pub *events.Publisher) {
 func publishDueReminders(ctx context.Context, st *store.Store, pub *events.Publisher, reminded *sync.Map) {
 	sessions, err := st.ListUpcomingSessions(ctx, reminderWindow)
 	if err != nil {
-		log.Printf("reminder scheduler: list sessions: %v", err)
+		slog.Error("reminder scheduler list failed", "err", err)
+		observability.CaptureError(err, map[string]string{"component": "reminder_scheduler"})
 		return
 	}
+	slog.Debug("reminder scheduler tick", "upcoming", len(sessions))
 	for _, sess := range sessions {
 		if _, loaded := reminded.LoadOrStore(sess.ID, true); loaded {
 			continue
@@ -55,8 +58,10 @@ func publishDueReminders(ctx context.Context, st *store.Store, pub *events.Publi
 			payload["student_email"] = studentEmails[0]
 		}
 		if err := pub.PublishReminderDue(ctx, payload); err != nil {
-			log.Printf("reminder scheduler: publish %s: %v", sess.ID, err)
+			slog.Warn("reminder publish failed", "session_id", sess.ID, "err", err)
 			reminded.Delete(sess.ID)
+		} else {
+			slog.Info("reminder published", "session_id", sess.ID, "listing_id", sess.ListingID)
 		}
 	}
 }

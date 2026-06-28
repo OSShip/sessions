@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -34,6 +35,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	roomName, jitsiURL := h.JitsiRoom(req.ListingID, id)
 	sess, err := h.Store.CreateSession(r.Context(), id, req.ListingID, req.ScheduledAt, roomName, jitsiURL)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "create session failed", "listing_id", req.ListingID, "err", err)
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
 	}
@@ -46,7 +48,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(studentEmails) > 0 {
 		payload["student_email"] = studentEmails[0]
 	}
-	_ = h.Events.PublishScheduled(r.Context(), payload)
+	if err := h.Events.PublishScheduled(r.Context(), payload); err != nil {
+		slog.WarnContext(r.Context(), "session scheduled event failed", "session_id", sess.ID, "err", err)
+	}
+	slog.InfoContext(r.Context(), "session created", "session_id", sess.ID, "listing_id", req.ListingID, "mentor_id", userID)
 	WriteJSON(w, http.StatusCreated, sess)
 }
 
@@ -98,5 +103,6 @@ func (h *Handler) Join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.Store.RecordJoin(r.Context(), id, userID)
+	slog.InfoContext(r.Context(), "session joined", "session_id", id, "user_id", userID)
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"jitsi_url": sess.JitsiURL, "room": sess.JitsiRoomName})
 }
