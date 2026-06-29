@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/OSShip/sessions/internal/jitsi"
 	"github.com/OSShip/sessions/internal/model"
 	"github.com/OSShip/utils/observability"
 	"github.com/go-chi/chi/v5"
@@ -137,6 +138,17 @@ func (h *Handler) Join(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+
+	var req struct {
+		Username string `json:"user_name"`
+		Email    string `json:"email"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	allowed, err := h.Store.CanAccessSession(r.Context(), id, userID)
 	if err != nil {
@@ -168,5 +180,15 @@ func (h *Handler) Join(w http.ResponseWriter, r *http.Request) {
 		slog.WarnContext(r.Context(), "record session join failed", "session_id", id, "user_id", userID, "err", err)
 	}
 	slog.InfoContext(r.Context(), "session joined", "session_id", id, "user_id", userID)
-	WriteJSON(w, http.StatusOK, map[string]interface{}{"jitsi_url": sess.JitsiURL, "room": sess.JitsiRoomName})
+
+	var jitsi_jwt string
+	jitsi_jwt, err = jitsi.SignJWTJitsi(req.Username, req.Email, userID == mentorID, h.Jitsi)
+
+	if err != nil {
+		observability.RespondError(w, r, http.StatusInternalServerError, "jitsi sign jwt failed", "sign jwt jitsi", err)
+		http.Error(w, `{"error":"jitsi sign jwt failed"}`, http.StatusInternalServerError)
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]any{"jitsi_jwt": jitsi_jwt, "jitsi_room": sess.JitsiRoomName})
 }

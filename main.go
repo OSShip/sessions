@@ -6,15 +6,16 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/OSShip/sessions/internal/config"
 	"github.com/OSShip/sessions/internal/events"
 	"github.com/OSShip/sessions/internal/handler"
+	"github.com/OSShip/sessions/internal/jitsi"
 	"github.com/OSShip/sessions/internal/scheduler"
 	"github.com/OSShip/sessions/internal/store"
 	"github.com/OSShip/utils/observability"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -37,7 +38,7 @@ func main() {
 	logger.Info("kafka publisher ready", "brokers", cfg.KafkaBrokers)
 
 	st := store.New(pool)
-	h := &handler.Handler{Store: st, Events: pub, JitsiBase: cfg.JitsiBaseURL}
+	h := &handler.Handler{Store: st, Events: pub, Jitsi: jitsi.JitsiInfo{ApiKey: cfg.JitsiApiKey, AppID: cfg.JitsiAppID, PrivateKeyFilepath: cfg.JitsiPrivateKeyFilename}}
 	scheduler.StartReminders(ctx, st, pub)
 	logger.Info("reminder scheduler started", "interval", "5m", "window", "30m")
 

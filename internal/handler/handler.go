@@ -10,9 +10,9 @@ import (
 )
 
 type Handler struct {
-	Store      *store.Store
-	Events     *events.Publisher
-	JitsiBase  string
+	Store  *store.Store
+	Events *events.Publisher
+	Jitsi  jitsi.JitsiInfo
 }
 
 func WriteJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -23,5 +23,5 @@ func WriteJSON(w http.ResponseWriter, status int, v interface{}) {
 
 func (h *Handler) JitsiRoom(listingID, sessionID string) (string, string) {
 	room := jitsi.RoomName(listingID, sessionID)
-	return room, jitsi.RoomURL(h.JitsiBase, room)
+	return room, jitsi.RoomURL(h.Jitsi.AppID, room)
 }
