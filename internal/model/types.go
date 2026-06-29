@@ -9,6 +9,7 @@ type Session struct {
 	JitsiRoomName string    `json:"jitsi_room_name"`
 	JitsiURL      string    `json:"jitsi_url"`
 	Status        string    `json:"status"`
+	IsActive      bool      `json:"is_active"`
 }
 
 type ProgressEntry struct {

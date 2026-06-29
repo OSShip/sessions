@@ -40,12 +40,22 @@ func (s *Store) CreateSession(ctx context.Context, id, listingID string, schedul
 		JitsiRoomName: roomName,
 		JitsiURL:      jitsiURL,
 		Status:        "scheduled",
+		IsActive:      false,
 	}, nil
+}
+
+func scanSession(row interface {
+	Scan(dest ...any) error
+}) (model.Session, error) {
+	var sess model.Session
+	err := row.Scan(&sess.ID, &sess.ListingID, &sess.ScheduledAt, &sess.JitsiRoomName, &sess.JitsiURL, &sess.Status, &sess.IsActive)
+	return sess, err
 }
 
 func (s *Store) ListByListing(ctx context.Context, listingID string) ([]model.Session, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, listing_id, scheduled_at, jitsi_room_name, jitsi_url, status FROM mentorship_sessions WHERE listing_id=$1 ORDER BY scheduled_at`, listingID)
+		`SELECT id, listing_id, scheduled_at, jitsi_room_name, jitsi_url, status, is_active
+		 FROM mentorship_sessions WHERE listing_id=$1 ORDER BY scheduled_at`, listingID)
 	if err != nil {
 		return nil, err
 	}
@@ -53,8 +63,8 @@ func (s *Store) ListByListing(ctx context.Context, listingID string) ([]model.Se
 
 	var list []model.Session
 	for rows.Next() {
-		var sess model.Session
-		if err := rows.Scan(&sess.ID, &sess.ListingID, &sess.ScheduledAt, &sess.JitsiRoomName, &sess.JitsiURL, &sess.Status); err != nil {
+		sess, err := scanSession(rows)
+		if err != nil {
 			continue
 		}
 		list = append(list, sess)
@@ -62,19 +72,32 @@ func (s *Store) ListByListing(ctx context.Context, listingID string) ([]model.Se
 	return list, nil
 }
 
-func (s *Store) UpdateSession(ctx context.Context, id string, scheduledAt *time.Time, status string) error {
+func (s *Store) GetSessionListingMentorID(ctx context.Context, sessionID string) (string, error) {
+	var mentorID string
+	err := s.pool.QueryRow(ctx, `
+		SELECT l.mentor_id FROM mentorship_sessions ms
+		JOIN listings l ON l.id = ms.listing_id
+		WHERE ms.id = $1`, sessionID).Scan(&mentorID)
+	return mentorID, err
+}
+
+func (s *Store) UpdateSession(ctx context.Context, id string, scheduledAt *time.Time, status string, isActive *bool) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE mentorship_sessions SET scheduled_at=COALESCE($1,scheduled_at), status=COALESCE(NULLIF($2,''),status), updated_at=NOW() WHERE id=$3`,
-		scheduledAt, status, id)
+		`UPDATE mentorship_sessions SET
+			scheduled_at = COALESCE($1, scheduled_at),
+			status = COALESCE(NULLIF($2, '')::session_status, status),
+			is_active = COALESCE($3, is_active),
+			updated_at = NOW()
+		WHERE id = $4`,
+		scheduledAt, status, isActive, id)
 	return err
 }
 
 func (s *Store) GetSession(ctx context.Context, id string) (model.Session, error) {
-	var sess model.Session
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, listing_id, scheduled_at, jitsi_room_name, jitsi_url, status FROM mentorship_sessions WHERE id=$1`, id).
-		Scan(&sess.ID, &sess.ListingID, &sess.ScheduledAt, &sess.JitsiRoomName, &sess.JitsiURL, &sess.Status)
-	return sess, err
+	row := s.pool.QueryRow(ctx,
+		`SELECT id, listing_id, scheduled_at, jitsi_room_name, jitsi_url, status, is_active
+		 FROM mentorship_sessions WHERE id=$1`, id)
+	return scanSession(row)
 }
 
 func (s *Store) CanAccessSession(ctx context.Context, sessionID, userID string) (bool, error) {
@@ -95,10 +118,6 @@ func (s *Store) CanAccessSession(ctx context.Context, sessionID, userID string) 
 func (s *Store) RecordJoin(ctx context.Context, sessionID, userID string) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO session_attendance (session_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, sessionID, userID)
-	if err != nil {
-		return err
-	}
-	_, err = s.pool.Exec(ctx, `UPDATE mentorship_sessions SET status='live' WHERE id=$1 AND status='scheduled'`, sessionID)
 	return err
 }
 
